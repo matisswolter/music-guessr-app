@@ -9,7 +9,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = [
+    "pytest>=8",
+    "flet[all]==0.28.3",
+    "fastapi==0.115.12",  # flet-web 0.28.3 breaks on newer FastAPI
+]
 
 [tool.flet]
 org = "io.github.matisswolter"

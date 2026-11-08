@@ -11,3 +11,5 @@ dist/
 .music_guessr/
 *.sqlite3
 spotify_token.json
+# flet run dev storage
+src/storage/
