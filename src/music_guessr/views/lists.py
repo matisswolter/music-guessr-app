@@ -36,8 +36,9 @@ def SongsView(page: ft.Page, state) -> ft.Control:  # noqa: N802
     songs = state.storage.guessed_songs()
     tiles = []
     for s in songs:
-        leading = ft.Image(src=s["image_url"], width=48, height=48, border_radius=6) if s["image_url"] \
-            else ft.Icon(ft.Icons.ALBUM)
+        leading = ft.Image(src=s["image_url"], width=48, height=48, border_radius=6, fit=ft.ImageFit.COVER,
+                           error_content=ft.Icon(ft.Icons.ALBUM)) if s["image_url"] \
+            else ft.Container(ft.Icon(ft.Icons.ALBUM), width=48, height=48, alignment=ft.alignment.center)
         year = f" · {s['year']}" if s["year"] else ""
         tile = ft.ListTile(
             leading=leading,
@@ -54,7 +55,11 @@ def ArtistsView(page: ft.Page, state) -> ft.Control:  # noqa: N802
     tiles = []
     for a in artists:
         tile = ft.ListTile(
-            leading=ft.CircleAvatar(content=ft.Text(a["name"][:1].upper())),
+            leading=ft.CircleAvatar(
+                content=ft.Text(a["name"][:1].upper()),  # shown until / unless the photo loads
+                foreground_image_src=a.get("image_url"),
+                radius=24,
+            ),
             title=ft.Text(a["name"]),
             subtitle=ft.Text(f"guessed {a['times_guessed']}×"),
             trailing=_wiki_button(page, a["wiki_url"]),

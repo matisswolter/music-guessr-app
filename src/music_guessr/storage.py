@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS guessed_songs (
 CREATE TABLE IF NOT EXISTS guessed_artists (
     artist_id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    image_url TEXT,
+    image_checked INTEGER NOT NULL DEFAULT 0,
     wiki_url TEXT,
     wiki_checked INTEGER NOT NULL DEFAULT 0,
     first_guessed_at TEXT NOT NULL,
@@ -53,6 +55,16 @@ class Storage:
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after the first release to existing databases."""
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(guessed_artists)")}
+        with self.conn:
+            if "image_url" not in cols:
+                self.conn.execute("ALTER TABLE guessed_artists ADD COLUMN image_url TEXT")
+            if "image_checked" not in cols:
+                self.conn.execute("ALTER TABLE guessed_artists ADD COLUMN image_checked INTEGER NOT NULL DEFAULT 0")
 
     def record_round(self, track: Track, result: RoundResult, playlist_id: str | None = None,
                      played_at: str | None = None) -> None:
@@ -95,6 +107,14 @@ class Storage:
 
     def artists_missing_wiki(self) -> list[dict]:
         return [dict(r) for r in self.conn.execute("SELECT * FROM guessed_artists WHERE wiki_checked = 0")]
+
+    def artists_missing_image(self) -> list[dict]:
+        return [dict(r) for r in self.conn.execute("SELECT * FROM guessed_artists WHERE image_checked = 0")]
+
+    def set_artist_image(self, artist_id: str, url: str | None) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE guessed_artists SET image_url = ?, image_checked = 1 WHERE artist_id = ?",
+                              (url, artist_id))
 
     def set_song_wiki(self, track_id: str, url: str | None) -> None:
         with self.conn:

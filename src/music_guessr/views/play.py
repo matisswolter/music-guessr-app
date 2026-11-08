@@ -20,22 +20,44 @@ def PlayView(page: ft.Page, state, on_round_finished) -> ft.Control:  # noqa: N8
         return root
 
     if not state.auth.logged_in:
+        # Reuse the pending login URL while a login is in progress (e.g. after switching tabs).
+        if not state.login_waiting:
+            state.login_url = state.auth.authorize_url()
+        hint = ft.Text("Waiting for Spotify login in your browser…" if state.login_waiting else "", opacity=0.7)
+
         def login(e):
+            # The button's `url` opens Spotify directly from the click (no pop-up blocker);
+            # here we only start listening for the redirect back to 127.0.0.1.
+            if state.login_waiting:
+                return
+            state.login_waiting = True
+            hint.value = "Waiting for Spotify login in your browser…"
+            page.update()
+
             def run():
                 try:
-                    state.auth.login_with_loopback(page.launch_url)
+                    state.auth.wait_for_redirect()
                     root.controls = PlayView(page, state, on_round_finished).controls
-                    page.update()
+                    snack("Logged in to Spotify ✔")
                 except Exception as exc:
-                    snack(f"Login failed: {exc}")
+                    hint.value = f"Login failed: {exc}"
+                finally:
+                    state.login_waiting = False
+                page.update()
             page.run_thread(run)
 
         root.controls = [
             ft.Text("Music Guessr", size=28, weight=ft.FontWeight.BOLD),
             ft.Text("Guess artist, title and year of songs from your own playlists."),
-            ft.FilledButton("Log in with Spotify", icon=ft.Icons.LOGIN, on_click=login),
+            ft.FilledButton("Log in with Spotify", icon=ft.Icons.LOGIN, url=state.login_url, on_click=login),
+            hint,
         ]
         return root
+
+    def logout(e):
+        state.auth.logout()
+        root.controls = PlayView(page, state, on_round_finished).controls
+        page.update()
 
     session: dict = {"game": None, "playlist_id": None}
 
@@ -58,7 +80,12 @@ def PlayView(page: ft.Page, state, on_round_finished) -> ft.Control:  # noqa: N8
         try:
             state.spotify.play(track.uri, game.snippet_start_ms(track))
         except HTTPError as exc:
-            snack("Open Spotify on a device first (Premium required)." if exc.status == 404 else str(exc))
+            if exc.status == 404:
+                snack("No Spotify device found – open the Spotify app on your phone or computer (Premium required).")
+            elif exc.status == 403:
+                snack("Spotify refused playback – a Premium account is required.")
+            else:
+                snack(str(exc))
 
     def next_round(e=None):
         game = session["game"]
@@ -90,7 +117,8 @@ def PlayView(page: ft.Page, state, on_round_finished) -> ft.Control:  # noqa: N8
         year_ok = result.year_diff is not None and result.year_diff <= 2
         year_txt = f"{track.year}" + ("" if result.year_diff in (None, 0) else f" (off by {result.year_diff})")
         reveal.content = ft.Card(ft.Container(padding=14, content=ft.Row([
-            ft.Image(src=track.image_url, width=96, height=96, border_radius=8) if track.image_url else ft.Icon(ft.Icons.ALBUM, size=96),
+            ft.Image(src=track.image_url, width=120, height=120, border_radius=8, fit=ft.ImageFit.COVER)
+            if track.image_url else ft.Icon(ft.Icons.ALBUM, size=120),
             ft.Column(expand=True, controls=[
                 mark(result.artist_ok, "Artist", track.artist_names),
                 mark(result.title_ok, "Title", track.title),
@@ -130,7 +158,9 @@ def PlayView(page: ft.Page, state, on_round_finished) -> ft.Control:  # noqa: N8
         reveal,
     ]
     root.controls = [
-        ft.Text("Music Guessr", size=28, weight=ft.FontWeight.BOLD),
+        ft.Row([ft.Text("Music Guessr", size=28, weight=ft.FontWeight.BOLD),
+                ft.IconButton(ft.Icons.LOGOUT, tooltip="Log out of Spotify", on_click=logout)],
+               alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
         ft.Row([playlist_dd, ft.FilledButton("Start", icon=ft.Icons.PLAY_ARROW, on_click=start)]),
         guess_area,
     ]

@@ -4,7 +4,8 @@ Guess the **artist**, **title** and **release year** of songs from your own Spot
 
 - 🎧 Snippets play from a random point in the song through your Spotify app
 - ✅ Fuzzy answer matching: `beatles` = *The Beatles*, `beyonce` = *Beyoncé*, *“– Remastered 2011”* is ignored
-- 📚 Two collections: **guessed songs** and **guessed artists**, each linked to Wikipedia when an article exists
+- 📚 Two collections: **guessed songs** (with album covers) and **guessed artists** (with artist photos),
+  each linked to Wikipedia when an article exists
 - 📊 A statistics page: points, streaks, accuracy rings, progress over time, accuracy by decade, top artists
 
 ## Tech stack: why Flet (Python)
@@ -38,18 +39,48 @@ If you later need deeper native integration, the Flutter/Dart route stays open.
 
 ## Setup
 
-1. Create an app at <https://developer.spotify.com/dashboard>, enable **Web API**, and add the redirect URI
-   `http://127.0.0.1:8888/callback`. Add your Spotify account(s) under *User Management*.
-2. Install and run (desktop, for development):
+### 1. Create the Spotify app (once, ~5 minutes)
 
-   ```bash
-   python3 -m venv .venv && source .venv/bin/activate
-   pip install -e ".[dev]"
-   export SPOTIFY_CLIENT_ID=<your client id>
-   flet run src/main.py
-   ```
+1. Log in at <https://developer.spotify.com/dashboard> and click **Create app**.
+2. Name and description: anything (e.g. "Music Guessr").
+3. **Redirect URI:** `http://127.0.0.1:8888/callback`. It must match exactly; Spotify no longer accepts `localhost`.
+4. Under *Which API/SDKs are you planning to use?* tick **Web API**, accept the terms and save.
+5. Open the app's **Settings** and copy the **Client ID**. No client secret is needed (PKCE login).
+6. Under **User Management**, add the Spotify account e-mail of every person who should be able to log in.
+   In Development Mode only allow-listed users can use the app.
 
-3. Tests: `pytest`, or with no extra packages: `python3 -m unittest discover -s tests`
+### 2. Run the app
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate     # see note below if venv/pip are missing
+pip install -e ".[dev]"
+cp .env.example .env        # then paste your Client ID into .env
+flet run --web --port 8550 src/main.py
+```
+
+Open <http://localhost:8550>. For an iPhone-sized view press **F12 → Ctrl+Shift+M** and choose an iPhone.
+`flet run src/main.py` (without `--web`) opens a desktop window instead.
+
+### 3. First game
+
+1. **Open the Spotify app** on your phone or computer. Playback is remote-controlled and needs **Premium**.
+2. In Music Guessr click **Log in with Spotify** and allow access in the tab that opens.
+3. Choose a playlist, then **Start**. The song plays on your Spotify device from a random position.
+
+**Troubleshooting**
+
+| Message / symptom | Fix |
+|---|---|
+| `INVALID_CLIENT: Invalid redirect URI` | Redirect URI in the dashboard must be exactly `http://127.0.0.1:8888/callback` |
+| "No Spotify device found" | Open the Spotify app and play/pause anything once so it becomes active |
+| "a Premium account is required" (403) | Playback control only works with Spotify Premium |
+| 403 when loading playlists / user not registered | Add the account under *User Management* in the dashboard |
+| Login tab shows "connection refused" | The app must be running on the same computer as the browser (redirect goes to 127.0.0.1) |
+
+Tests: `pytest`, or with no extra packages: `python3 -m unittest discover -s tests`
+
+> **No `python3-venv` / pip on Debian?** `python3 -m venv --without-pip .venv`, then download
+> <https://bootstrap.pypa.io/get-pip.py> and run `.venv/bin/python get-pip.py`.
 
 ### Building for mobile
 
@@ -72,6 +103,7 @@ src/
     matching.py              # fuzzy guess matching
     spotify.py               # OAuth PKCE, playlists, playback
     wikipedia.py             # Wikidata (Spotify IDs) + Wikipedia search
+    images.py                # artist photos: Spotify, Wikipedia as fallback
     storage.py               # SQLite: rounds, guessed songs, guessed artists
     stats.py                 # statistics computations
     views/                   # play, lists (songs/artists), stats screens

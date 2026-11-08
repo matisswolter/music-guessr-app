@@ -97,33 +97,52 @@ class SpotifyAuth:
         self.token = data
         self.token_file.write_text(json.dumps(data))
 
-    def login_with_loopback(self, open_url: Callable[[str], None], timeout: float = 300) -> None:
-        """Desktop dev flow: open the browser and catch the redirect on 127.0.0.1."""
+    def wait_for_redirect(self, timeout: float = 300) -> None:
+        """Listen on the loopback redirect URI (127.0.0.1) until Spotify sends the code, then exchange it.
+
+        Call authorize_url() first and open that URL in a browser.
+        """
         parsed = urllib.parse.urlparse(self.redirect_uri)
         result: dict = {}
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):  # noqa: N802
-                qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-                result.update({k: v[0] for k, v in qs.items()})
+                url = urllib.parse.urlparse(self.path)
+                if url.path != parsed.path:  # e.g. /favicon.ico
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                result.update({k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()})
+                ok = "code" in result
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.end_headers()
-                self.wfile.write("<h2>Logged in – you can return to Music Guessr.</h2>".encode())
+                msg = "Logged in &ndash; you can close this tab and return to Music Guessr." if ok \
+                    else f"Login failed: {result.get('error', 'unknown error')}"
+                self.wfile.write(f"<body style='font-family:sans-serif;text-align:center;margin-top:20vh'>"
+                                 f"<h2>{msg}</h2></body>".encode())
 
             def log_message(self, *args):
                 pass
 
+        http.server.HTTPServer.allow_reuse_address = True
         server = http.server.HTTPServer((parsed.hostname, parsed.port or 80), Handler)
-        server.timeout = timeout
-        thread = threading.Thread(target=server.handle_request, daemon=True)
-        thread.start()
-        open_url(self.authorize_url())
-        thread.join(timeout)
-        server.server_close()
+        server.timeout = 1
+        deadline = time.time() + timeout
+        try:
+            while not result and time.time() < deadline:
+                server.handle_request()
+        finally:
+            server.server_close()
         if "code" not in result:
             raise RuntimeError(result.get("error", "Login timed out"))
         self.exchange_code(result["code"], result.get("state", ""))
+
+    def login_with_loopback(self, open_url: Callable[[str], None], timeout: float = 300) -> None:
+        """Desktop dev flow: open the browser and catch the redirect on 127.0.0.1."""
+        url = self.authorize_url()
+        threading.Timer(0.3, open_url, args=(url,)).start()
+        self.wait_for_redirect(timeout)
 
 
 def _track_from_json(t: dict) -> Track | None:
@@ -183,13 +202,27 @@ class SpotifyClient:
         tracks = [_track_from_json(e.get("item") or e.get("track")) for e in entries]
         return [t for t in tracks if t]
 
+    def artist_image(self, artist_id: str) -> str | None:
+        if len(artist_id) != 22 or not artist_id.isalnum():  # not a real Spotify ID
+            return None
+        images = self._call("GET", f"/artists/{artist_id}").get("images") or []
+        # images are sorted largest first; pick a mid-size one for list avatars
+        return (images[1] if len(images) > 1 else images[0])["url"] if images else None
+
     # --- playback (Premium + an active Spotify device required) ---------------
     def devices(self) -> list[dict]:
         return self._call("GET", "/me/player/devices").get("devices", [])
 
     def play(self, uri: str, position_ms: int = 0, device_id: str | None = None) -> None:
-        params = {"device_id": device_id} if device_id else None
-        self._call("PUT", "/me/player/play", params=params, json_body={"uris": [uri], "position_ms": position_ms})
+        """Play on the active device; if none is active, wake up the first available one."""
+        body = {"uris": [uri], "position_ms": position_ms}
+        try:
+            self._call("PUT", "/me/player/play", params={"device_id": device_id} if device_id else None, json_body=body)
+        except HTTPError as e:
+            devices = self.devices() if e.status == 404 and not device_id else []
+            if not devices:
+                raise
+            self._call("PUT", "/me/player/play", params={"device_id": devices[0]["id"]}, json_body=body)
 
     def pause(self) -> None:
         try:

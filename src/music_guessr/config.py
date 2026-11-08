@@ -3,6 +3,20 @@
 import os
 from pathlib import Path
 
+
+def _load_dotenv() -> None:
+    """Read KEY=value lines from a .env file in the project root (dev convenience, never committed)."""
+    env_file = Path(__file__).resolve().parents[2] / ".env"
+    if not env_file.is_file():
+        return
+    for line in env_file.read_text().splitlines():
+        key, sep, value = line.partition("=")
+        if sep and not key.strip().startswith("#"):
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_dotenv()
+
 # Create an app at https://developer.spotify.com/dashboard and paste its Client ID here
 # (or set SPOTIFY_CLIENT_ID). With the PKCE flow no client secret is needed in the app.
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")

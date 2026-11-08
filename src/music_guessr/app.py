@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import flet as ft
 
-from . import config, wikipedia
+from . import config, images, wikipedia
 from .spotify import SpotifyAuth, SpotifyClient
 from .storage import Storage
 from .views.lists import ArtistsView, SongsView
@@ -21,6 +21,8 @@ class AppState:
         self.auth = SpotifyAuth(config.SPOTIFY_CLIENT_ID, config.SPOTIFY_REDIRECT_URI, data / "spotify_token.json") \
             if config.SPOTIFY_CLIENT_ID else None
         self.spotify = SpotifyClient(self.auth) if self.auth else None
+        self.login_waiting = False
+        self.login_url = ""
 
 
 def main(page: ft.Page):
@@ -39,10 +41,13 @@ def main(page: ft.Page):
 
     def _fill_links():
         try:
-            if wikipedia.fill_missing_links(state.storage):
+            changed = wikipedia.fill_missing_links(state.storage)
+            spotify = state.spotify if state.auth and state.auth.logged_in else None
+            changed += images.fill_artist_images(state.storage, spotify)
+            if changed:
                 refresh_current()
         except Exception as exc:  # network trouble shouldn't break the game
-            print("Wikipedia lookup failed:", exc)
+            print("Background lookup failed:", exc)
 
     views = [
         lambda: PlayView(page, state, on_round_finished),

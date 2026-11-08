@@ -77,6 +77,16 @@ def search_song(title: str, artist: str, lang: str = WIKIPEDIA_LANG) -> str | No
     return None
 
 
+def thumbnail(article_url: str) -> str | None:
+    """Lead image of a Wikipedia article (used as artist photo fallback)."""
+    try:
+        host, title = article_url.split("/wiki/", 1)
+        data = request("GET", f"{host}/api/rest_v1/page/summary/{title}")
+    except (ValueError, HTTPError, OSError):
+        return None
+    return (data.get("thumbnail") or {}).get("source")
+
+
 def fill_missing_links(storage) -> int:
     """Look up links for all guessed songs/artists not checked yet. Returns number of links found."""
     found = 0
