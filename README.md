@@ -55,7 +55,7 @@ If you later need deeper native integration, the Flutter/Dart route stays open.
 python3 -m venv .venv && source .venv/bin/activate     # see note below if venv/pip are missing
 pip install -e ".[dev]"
 cp .env.example .env        # then paste your Client ID into .env
-flet run --web --port 8550 src/main.py
+flet run --web --port 8550 -d -r src/main.py   # -d -r: auto-restart on any code change
 ```
 
 Open <http://localhost:8550>. For an iPhone-sized view press **F12 → Ctrl+Shift+M** and choose an iPhone.
