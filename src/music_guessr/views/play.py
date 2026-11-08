@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import flet as ft
 
+from .. import config
 from ..game import GameSession
 from ..http import HTTPError
 
@@ -61,11 +62,28 @@ def PlayView(page: ft.Page, state, on_round_finished) -> ft.Control:  # noqa: N8
 
     session: dict = {"game": None, "playlist_id": None}
 
-    playlist_dd = ft.Dropdown(label="Playlist", expand=True)
-    try:
-        playlist_dd.options = [ft.dropdown.Option(key=p["id"], text=p["name"]) for p in state.spotify.playlists()]
-    except (HTTPError, OSError) as exc:
-        snack(f"Could not load playlists: {exc}")
+    playlist_dd = ft.Dropdown(label="Loading playlists…", expand=True, disabled=True)
+    playlist_note = ft.Text(size=12, opacity=0.7)
+    loading = ft.ProgressRing(width=20, height=20, stroke_width=2)
+
+    def load_playlists():
+        # First run checks which followed playlists are readable (~10 s), later runs use the cache.
+        try:
+            readable, hidden = state.spotify.readable_playlists(config.data_dir() / "playlist_access.json")
+            size = state.spotify.playlist_size
+            playlist_dd.options = [
+                ft.dropdown.Option(key=p["id"], text=f"{p['name']} ({size(p)})" if size(p) is not None else p["name"])
+                for p in readable
+            ]
+            playlist_dd.label, playlist_dd.disabled = "Playlist", False
+            if hidden:
+                playlist_note.value = (f"{hidden} followed playlist(s) hidden – Spotify only lets this app read "
+                                       "playlists you own or collaborate on.")
+        except (HTTPError, OSError) as exc:
+            playlist_dd.label = "Could not load playlists"
+            snack(f"Could not load playlists: {exc}")
+        loading.visible = False
+        page.update()
 
     status = ft.Text(opacity=0.7)
     artist_tf = ft.TextField(label="Artist", prefix_icon=ft.Icons.PERSON)
@@ -113,7 +131,10 @@ def PlayView(page: ft.Page, state, on_round_finished) -> ft.Control:  # noqa: N8
         track = game.current
         result = game.submit(artist_tf.value, title_tf.value, year_tf.value)
         state.storage.record_round(track, result, session["playlist_id"])
-        state.spotify.pause()
+        try:
+            state.spotify.pause()
+        except Exception as exc:  # never let a playback hiccup hide the answer
+            print("Pause failed:", exc)
         year_ok = result.year_diff is not None and result.year_diff <= 2
         year_txt = f"{track.year}" + ("" if result.year_diff in (None, 0) else f" (off by {result.year_diff})")
         reveal.content = ft.Card(ft.Container(padding=14, content=ft.Row([
@@ -138,6 +159,9 @@ def PlayView(page: ft.Page, state, on_round_finished) -> ft.Control:  # noqa: N8
             return
         try:
             tracks = state.spotify.playlist_tracks(playlist_dd.value)
+        except PermissionError as exc:
+            snack(str(exc))
+            return
         except (HTTPError, OSError) as exc:
             snack(f"Could not load tracks: {exc}")
             return
@@ -161,7 +185,9 @@ def PlayView(page: ft.Page, state, on_round_finished) -> ft.Control:  # noqa: N8
         ft.Row([ft.Text("Music Guessr", size=28, weight=ft.FontWeight.BOLD),
                 ft.IconButton(ft.Icons.LOGOUT, tooltip="Log out of Spotify", on_click=logout)],
                alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-        ft.Row([playlist_dd, ft.FilledButton("Start", icon=ft.Icons.PLAY_ARROW, on_click=start)]),
+        ft.Row([playlist_dd, loading, ft.FilledButton("Start", icon=ft.Icons.PLAY_ARROW, on_click=start)]),
+        playlist_note,
         guess_area,
     ]
+    page.run_thread(load_playlists)
     return root

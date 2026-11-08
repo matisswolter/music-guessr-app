@@ -79,5 +79,22 @@ class TestArtistImages(unittest.TestCase):
         self.assertEqual(db.artists_missing_image()[0]["image_url"], None)
 
 
+class TestHttpNonJson(unittest.TestCase):
+    def test_non_json_body_is_tolerated(self):
+        import http.server
+        from music_guessr.http import request
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_PUT(self):  # noqa: N802
+                self.send_response(200); self.end_headers(); self.wfile.write(b"ok, paused")
+            def log_message(self, *a):
+                pass
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.handle_request, daemon=True).start()
+        self.assertIsNone(request("PUT", f"http://127.0.0.1:{srv.server_port}/me/player/pause"))
+        srv.server_close()
+
+
 if __name__ == "__main__":
     unittest.main()

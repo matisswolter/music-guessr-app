@@ -169,15 +169,18 @@ class SpotifyClient:
 
     def _call(self, method: str, path: str, **kw):
         url = path if path.startswith("http") else API + path
-        headers = {"Authorization": f"Bearer {self.auth.access_token()}"}
-        try:
-            return request(method, url, headers=headers, **kw)
-        except HTTPError as e:
-            if e.status != 401:
-                raise
-            self.auth.refresh()
+        for attempt in range(3):
             headers = {"Authorization": f"Bearer {self.auth.access_token()}"}
-            return request(method, url, headers=headers, **kw)
+            try:
+                return request(method, url, headers=headers, **kw)
+            except HTTPError as e:
+                if e.status == 401 and attempt == 0:
+                    self.auth.refresh()
+                elif e.status == 429 and attempt < 2:
+                    # Development Mode apps have a low rate limit; wait as Spotify asks (capped).
+                    time.sleep(min(float(e.retry_after or 2), 15))
+                else:
+                    raise
 
     def _paged(self, path: str, params: dict | None = None):
         page = self._call("GET", path, params=params)
@@ -191,14 +194,57 @@ class SpotifyClient:
     def playlists(self) -> list[dict]:
         return [p for p in self._paged("/me/playlists", {"limit": 50}) if p]
 
+    def can_read_playlist(self, playlist_id: str) -> bool:
+        try:
+            self._call("GET", f"/playlists/{playlist_id}/items", params={"limit": 1})
+            return True
+        except HTTPError as e:
+            if e.status in (403, 404):
+                return False
+            raise
+
+    def readable_playlists(self, cache_file: Path | None = None) -> tuple[list[dict], int]:
+        """Playlists whose songs this app may read, plus the number of hidden ones.
+
+        Apps in Spotify Development Mode may only read the contents of playlists the
+        user owns or collaborates on; merely followed playlists answer 403. Own playlists
+        are trusted, the others are probed once (sequentially, to respect the rate limit)
+        and the result is cached per playlist version (snapshot_id).
+        """
+        cache: dict = {}
+        if cache_file and cache_file.exists():
+            try:
+                cache = json.loads(cache_file.read_text())
+            except ValueError:
+                cache = {}
+        me = self.me()["id"]
+        playlists = self.playlists()
+        readable = []
+        for p in playlists:
+            if (p.get("owner") or {}).get("id") == me or p.get("collaborative"):
+                readable.append(p)
+                continue
+            key = f"{p['id']}:{p.get('snapshot_id', '')}"
+            if key not in cache:
+                cache[key] = self.can_read_playlist(p["id"])
+            if cache[key]:
+                readable.append(p)
+        if cache_file:
+            cache_file.write_text(json.dumps(cache))
+        return readable, len(playlists) - len(readable)
+
+    @staticmethod
+    def playlist_size(playlist: dict) -> int | None:
+        return (playlist.get("items") or playlist.get("tracks") or {}).get("total")
+
     def playlist_tracks(self, playlist_id: str) -> list[Track]:
-        # Spotify renamed /tracks -> /items (and item["track"] -> item["item"]); support both.
         try:
             entries = list(self._paged(f"/playlists/{playlist_id}/items", {"limit": 50}))
         except HTTPError as e:
-            if e.status != 404:
-                raise
-            entries = list(self._paged(f"/playlists/{playlist_id}/tracks", {"limit": 100}))
+            if e.status == 403:
+                raise PermissionError("Spotify only lets this app read playlists you own or collaborate on. "
+                                      "Copy the songs into a playlist of your own to play them.") from None
+            raise
         tracks = [_track_from_json(e.get("item") or e.get("track")) for e in entries]
         return [t for t in tracks if t]
 

@@ -11,10 +11,11 @@ from .config import USER_AGENT
 
 
 class HTTPError(Exception):
-    def __init__(self, status: int, body: str):
+    def __init__(self, status: int, body: str, retry_after: str | None = None):
         super().__init__(f"HTTP {status}: {body[:300]}")
         self.status = status
         self.body = body
+        self.retry_after = retry_after
 
 
 def request(method: str, url: str, *, params: dict | None = None, headers: dict | None = None,
@@ -36,5 +37,8 @@ def request(method: str, url: str, *, params: dict | None = None, headers: dict 
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read()
     except urllib.error.HTTPError as e:
-        raise HTTPError(e.code, e.read().decode(errors="replace")) from None
-    return json.loads(raw) if raw else None
+        raise HTTPError(e.code, e.read().decode(errors="replace"), e.headers.get("Retry-After")) from None
+    try:
+        return json.loads(raw) if raw.strip() else None
+    except ValueError:  # some endpoints (e.g. Spotify player) answer with a non-JSON body
+        return None
