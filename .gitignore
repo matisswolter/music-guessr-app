@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+# local app data / tokens
+.music_guessr/
+*.sqlite3
+spotify_token.json

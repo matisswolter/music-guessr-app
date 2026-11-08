@@ -1,0 +1,25 @@
+[project]
+name = "music-guessr"
+version = "0.1.0"
+description = "Guess the artist, title and release year of songs from your own Spotify playlists."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "flet==0.28.3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.flet]
+org = "io.github.matisswolter"
+product = "Music Guessr"
+company = "Music Guessr"
+copyright = "Copyright (C) 2026 Music Guessr contributors"
+
+[tool.flet.app]
+path = "src"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
