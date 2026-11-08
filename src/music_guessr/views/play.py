@@ -2,11 +2,31 @@
 
 from __future__ import annotations
 
+import json
+
 import flet as ft
 
 from .. import config
 from ..game import GameSession
 from ..http import HTTPError
+from ..spotify import LIKED_SONGS
+
+
+def _settings_file():
+    return config.data_dir() / "settings.json"
+
+
+def _load_settings() -> dict:
+    try:
+        return json.loads(_settings_file().read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_setting(key: str, value) -> None:
+    settings = _load_settings()
+    settings[key] = value
+    _settings_file().write_text(json.dumps(settings))
 
 
 def PlayView(page: ft.Page, state, on_round_finished) -> ft.Control:  # noqa: N802
@@ -25,6 +45,8 @@ def PlayView(page: ft.Page, state, on_round_finished) -> ft.Control:  # noqa: N8
         if not state.login_waiting:
             state.login_url = state.auth.authorize_url()
         hint = ft.Text("Waiting for Spotify login in your browser…" if state.login_waiting else "", opacity=0.7)
+        relogin = ft.Text("Music Guessr needs one more Spotify permission (Liked Songs) – please log in again.",
+                          visible=bool(state.auth.token), color=ft.Colors.ORANGE)
 
         def login(e):
             # The button's `url` opens Spotify directly from the click (no pop-up blocker);
@@ -50,6 +72,7 @@ def PlayView(page: ft.Page, state, on_round_finished) -> ft.Control:  # noqa: N8
         root.controls = [
             ft.Text("Music Guessr", size=28, weight=ft.FontWeight.BOLD),
             ft.Text("Guess artist, title and year of songs from your own playlists."),
+            relogin,
             ft.FilledButton("Log in with Spotify", icon=ft.Icons.LOGIN, url=state.login_url, on_click=login),
             hint,
         ]
@@ -71,11 +94,21 @@ def PlayView(page: ft.Page, state, on_round_finished) -> ft.Control:  # noqa: N8
         try:
             readable, hidden = state.spotify.readable_playlists(config.data_dir() / "playlist_access.json")
             size = state.spotify.playlist_size
-            playlist_dd.options = [
+            readable.sort(key=lambda p: p["name"].strip().casefold())
+            options = [
                 ft.dropdown.Option(key=p["id"], text=f"{p['name']} ({size(p)})" if size(p) is not None else p["name"])
                 for p in readable
             ]
+            try:
+                options.insert(0, ft.dropdown.Option(
+                    key=LIKED_SONGS, text=f"❤ Liked Songs ({state.spotify.liked_songs_count()})"))
+            except (HTTPError, OSError) as exc:
+                print("Liked Songs unavailable:", exc)
+            playlist_dd.options = options
             playlist_dd.label, playlist_dd.disabled = "Playlist", False
+            last = _load_settings().get("last_playlist")
+            if any(o.key == last for o in options):
+                playlist_dd.value = last
             if hidden:
                 playlist_note.value = (f"{hidden} followed playlist(s) hidden – Spotify only lets this app read "
                                        "playlists you own or collaborate on.")
@@ -157,14 +190,23 @@ def PlayView(page: ft.Page, state, on_round_finished) -> ft.Control:  # noqa: N8
         if not playlist_dd.value:
             snack("Choose a playlist first")
             return
+        _save_setting("last_playlist", playlist_dd.value)
+        loading.visible = True
+        status.value = "Loading songs…"
+        page.update()
         try:
             tracks = state.spotify.playlist_tracks(playlist_dd.value)
         except PermissionError as exc:
+            status.value = ""
             snack(str(exc))
             return
         except (HTTPError, OSError) as exc:
+            status.value = ""
             snack(f"Could not load tracks: {exc}")
             return
+        finally:
+            loading.visible = False
+            page.update()
         if not tracks:
             snack("This playlist has no playable tracks")
             return

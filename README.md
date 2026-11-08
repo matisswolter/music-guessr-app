@@ -55,17 +55,19 @@ If you later need deeper native integration, the Flutter/Dart route stays open.
 python3 -m venv .venv && source .venv/bin/activate     # see note below if venv/pip are missing
 pip install -e ".[dev]"
 cp .env.example .env        # then paste your Client ID into .env
-flet run --web --port 8550 -d -r src/main.py   # -d -r: auto-restart on any code change
+python scripts/dev_server.py     # web app on port 8550, restarts on every code change
 ```
 
 Open <http://localhost:8550>. For an iPhone-sized view press **F12 → Ctrl+Shift+M** and choose an iPhone.
+After a code change the dev server restarts by itself; just press **F5** in the browser.
+(`flet run -d -r --web` can't restart while a browser tab is connected, hence the small runner script.)
 `flet run src/main.py` (without `--web`) opens a desktop window instead.
 
 ### 3. First game
 
 1. **Open the Spotify app** on your phone or computer. Playback is remote-controlled and needs **Premium**.
 2. In Music Guessr click **Log in with Spotify** and allow access in the tab that opens.
-3. Choose a playlist, then **Start**. The song plays on your Spotify device from a random position.
+3. Choose a playlist (or ❤ Liked Songs), then **Start**. The song plays on your Spotify device from a random position.
 
 **Troubleshooting**
 
@@ -75,6 +77,8 @@ Open <http://localhost:8550>. For an iPhone-sized view press **F12 → Ctrl+Shif
 | "No Spotify device found" | Open the Spotify app and play/pause anything once so it becomes active |
 | "a Premium account is required" (403) | Playback control only works with Spotify Premium |
 | 403 when loading playlists / user not registered | Add the account under *User Management* in the dashboard |
+| "needs one more Spotify permission" | The app asks for a new permission (e.g. Liked Songs); log in again once |
+| Some playlists missing | Only playlists you own or collaborate on can be read in Development Mode; followed ones are hidden |
 | Login tab shows "connection refused" | The app must be running on the same computer as the browser (redirect goes to 127.0.0.1) |
 
 Tests: `pytest`, or with no extra packages: `python3 -m unittest discover -s tests`

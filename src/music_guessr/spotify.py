@@ -11,6 +11,7 @@ import base64
 import hashlib
 import http.server
 import json
+import random
 import secrets
 import threading
 import time
@@ -29,7 +30,9 @@ SCOPES = " ".join([
     "playlist-read-collaborative",
     "user-read-playback-state",
     "user-modify-playback-state",
+    "user-library-read",  # Liked Songs
 ])
+LIKED_SONGS = "liked"  # pseudo playlist id for the user's Liked Songs
 
 
 class SpotifyAuth:
@@ -44,8 +47,16 @@ class SpotifyAuth:
         self.token: dict | None = json.loads(token_file.read_text()) if token_file.exists() else None
 
     @property
+    def missing_scopes(self) -> set[str]:
+        """Permissions requested by this version but not granted to the stored login."""
+        if not self.token:
+            return set(SCOPES.split())
+        return set(SCOPES.split()) - set(self.token.get("scope", "").split())
+
+    @property
     def logged_in(self) -> bool:
-        return bool(self.token)
+        # A login from an older app version lacking new permissions counts as logged out.
+        return bool(self.token) and not self.missing_scopes
 
     def authorize_url(self) -> str:
         self._verifier = secrets.token_urlsafe(64)[:128]
@@ -237,7 +248,25 @@ class SpotifyClient:
     def playlist_size(playlist: dict) -> int | None:
         return (playlist.get("items") or playlist.get("tracks") or {}).get("total")
 
+    def liked_songs_count(self) -> int:
+        return self._call("GET", "/me/tracks", params={"limit": 1}).get("total", 0)
+
+    def liked_tracks(self, max_tracks: int = 500, rng: random.Random | None = None) -> list[Track]:
+        """Liked Songs; for big libraries a random sample of whole pages keeps loading fast."""
+        page_size = 50
+        total = self.liked_songs_count()
+        offsets = list(range(0, total, page_size))
+        if total > max_tracks:
+            offsets = sorted((rng or random).sample(offsets, max_tracks // page_size))
+        entries = []
+        for offset in offsets:
+            entries += self._call("GET", "/me/tracks", params={"limit": page_size, "offset": offset}).get("items", [])
+        tracks = [_track_from_json(e.get("item") or e.get("track")) for e in entries]
+        return [t for t in tracks if t]
+
     def playlist_tracks(self, playlist_id: str) -> list[Track]:
+        if playlist_id == LIKED_SONGS:
+            return self.liked_tracks()
         try:
             entries = list(self._paged(f"/playlists/{playlist_id}/items", {"limit": 50}))
         except HTTPError as e:

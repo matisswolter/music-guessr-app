@@ -49,8 +49,11 @@ def main(page: ft.Page):
         except Exception as exc:  # network trouble shouldn't break the game
             print("Background lookup failed:", exc)
 
+    # The Play screen is built once and kept, so a running game survives tab switches.
+    # The other screens are rebuilt on every visit to show fresh data.
+    play_view = PlayView(page, state, on_round_finished)
     views = [
-        lambda: PlayView(page, state, on_round_finished),
+        lambda: play_view,
         lambda: SongsView(page, state),
         lambda: ArtistsView(page, state),
         lambda: StatsView(page, state),
