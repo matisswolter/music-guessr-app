@@ -2,7 +2,13 @@
 
 Guess the **artist**, **title** and **release year** of songs from your own Spotify playlists.
 
-- 🎧 Snippets play from a random point in the song through your Spotify app
+> **Branch `deezer-previews`:** your playlists come from a file *you* export from Spotify, and the
+> 30-second snippets are played in the app from **Deezer's** free preview API. This app never talks to the
+> Spotify API, so no Spotify developer app, no Premium and no open Spotify device are needed.
+> The Spotify-API version lives on `main`.
+
+- 🎧 30-second Deezer previews, played right inside the app (no "now playing" spoilers)
+- 📥 Import playlists from an [Exportify](https://exportify.net) CSV or from Spotify's "Download your data" export
 - ✅ Fuzzy answer matching: `beatles` = *The Beatles*, `beyonce` = *Beyoncé*, *“– Remastered 2011”* is ignored
 - 📚 Two collections: **guessed songs** (with album covers) and **guessed artists** (with artist photos),
   each linked to Wikipedia when an article exists
@@ -22,39 +28,32 @@ write plain Python and `flet build ipa` / `flet build apk` produce real iOS and 
 | React Native / Expo | TypeScript | ✅ | Best ecosystem (official Spotify SDK wrappers), but a new language |
 | Swift (SwiftUI) | Swift | iOS only | Best iOS integration, but Android would need a second app |
 
-**Trade-off:** Flet can't call native SDKs such as the Spotify iOS SDK. That's why playback uses the Spotify
-**Web API remote-control endpoints** (`PUT /me/player/play`), which tell the user's Spotify app what to play.
-If you later need deeper native integration, the Flutter/Dart route stays open.
+**Trade-off:** Flet can't call native SDKs. Audio is played with Flet's own audio player, and if you later
+need deeper native integration, the Flutter/Dart route stays open.
 
-## Spotify caveats (important)
+## Why import + Deezer instead of the Spotify API?
 
-- **Spotify Premium + an open Spotify app** (phone, desktop or speaker) are needed for playback.
-  Spotify removed 30-second `preview_url`s for new apps in late 2024.
-- Spotify's app shows "now playing", so put the phone face-down or play on a speaker or another device 😉
-- New Spotify apps start in **Development Mode**, which allows only a few allow-listed users, and Spotify has kept
-  tightening those limits through 2025–2026. Read the current
-  [Web API docs and quota rules](https://developer.spotify.com/documentation/web-api) before planning a public release.
-- The release year comes from the album's `release_date`. For remasters and compilations that's the re-release
-  year. A future improvement is to look up the original year on MusicBrainz.
+- Spotify's [Developer Policy](https://developer.spotify.com/policy) says "Do not create a game, including trivia
+  quizzes" (III.2) and forbids combining Spotify with other services' streams (III.5). It *does* allow users to
+  transfer their own data (III.9). So the user exports their playlists, and this app only reads that file.
+- [Deezer's API](https://developers.deezer.com/termsofuse) gives free 30-second previews, but **for non-commercial
+  use only** (no ads, no paid version), and audio must not be stored. Previews are fetched fresh for every round.
+  Get Deezer's written OK before an App Store release; Apple may ask for it (Review Guideline 5.2.2).
 
 ## Setup
 
-### 1. Create the Spotify app (once, ~5 minutes)
+### 1. Export your playlists from Spotify
 
-1. Log in at <https://developer.spotify.com/dashboard> and click **Create app**.
-2. Name and description: anything (e.g. "Music Guessr").
-3. **Redirect URI:** `http://127.0.0.1:8888/callback`. It must match exactly; Spotify no longer accepts `localhost`.
-4. Under *Which API/SDKs are you planning to use?* tick **Web API**, accept the terms and save.
-5. Open the app's **Settings** and copy the **Client ID**. No client secret is needed (PKCE login).
-6. Under **User Management**, add the Spotify account e-mail of every person who should be able to log in.
-   In Development Mode only allow-listed users can use the app.
+| Option | What you get | Notes |
+|---|---|---|
+| **[Exportify](https://exportify.net)** (recommended) | one `.csv` per playlist | Includes album release date and ISRC, so the year is better and Deezer matches are exact |
+| Spotify **[Download your data](https://www.spotify.com/account/privacy/)** → "Account data" | `Playlist1.json` (all playlists), `YourLibrary.json` (Liked Songs) | Takes a few days. No years in the export, so the year comes from Deezer, which is often a compilation year |
 
 ### 2. Run the app
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate     # see note below if venv/pip are missing
 pip install -e ".[dev]"
-cp .env.example .env        # then paste your Client ID into .env
 python scripts/dev_server.py     # web app on port 8550, restarts on every code change
 ```
 
@@ -65,21 +64,9 @@ After a code change the dev server restarts by itself; just press **F5** in the 
 
 ### 3. First game
 
-1. **Open the Spotify app** on your phone or computer. Playback is remote-controlled and needs **Premium**.
-2. In Music Guessr click **Log in with Spotify** and allow access in the tab that opens.
-3. Choose a playlist (or ❤ Liked Songs), then **Start**. The song plays on your Spotify device from a random position.
-
-**Troubleshooting**
-
-| Message / symptom | Fix |
-|---|---|
-| `INVALID_CLIENT: Invalid redirect URI` | Redirect URI in the dashboard must be exactly `http://127.0.0.1:8888/callback` |
-| "No Spotify device found" | Open the Spotify app and play/pause anything once so it becomes active |
-| "a Premium account is required" (403) | Playback control only works with Spotify Premium |
-| 403 when loading playlists / user not registered | Add the account under *User Management* in the dashboard |
-| "needs one more Spotify permission" | The app asks for a new permission (e.g. Liked Songs); log in again once |
-| Some playlists missing | Only playlists you own or collaborate on can be read in Development Mode; followed ones are hidden |
-| Login tab shows "connection refused" | The app must be running on the same computer as the browser (redirect goes to 127.0.0.1) |
+1. Click **Import** and choose one or more exported files. Re-importing a playlist with the same name replaces it.
+2. Choose the playlist, then **Start**. The preview plays right away; **Replay snippet** plays it again.
+3. Songs Deezer has no preview for are skipped automatically (the status line counts them).
 
 Tests: `pytest`, or with no extra packages: `python3 -m unittest discover -s tests`
 
@@ -93,8 +80,7 @@ flet build ipa   # iOS – needs macOS + Xcode + Apple developer account
 flet build apk   # Android
 ```
 
-Before the mobile builds can log in, the login flow needs a custom URL-scheme redirect
-(e.g. `musicguessr://callback`) instead of the loopback server. See the TODO list.
+Flet 0.28's `ft.Audio` is deprecated; when upgrading Flet, switch to the `flet-audio` package.
 
 ## Project layout
 
@@ -105,10 +91,11 @@ src/
     app.py                   # app shell + bottom navigation
     game.py                  # scoring & rounds
     matching.py              # fuzzy guess matching
-    spotify.py               # OAuth PKCE, playlists, playback
+    importer.py              # Exportify CSV + Spotify data export (JSON) import
+    deezer.py                # preview lookup (ISRC, then scored search), covers, artist pictures
     wikipedia.py             # Wikidata (Spotify IDs) + Wikipedia search
-    images.py                # artist photos: Spotify, Wikipedia as fallback
-    storage.py               # SQLite: rounds, guessed songs, guessed artists
+    images.py                # artist photos: Deezer, Wikipedia as fallback
+    storage.py               # SQLite: playlists, Deezer matches, rounds, guessed songs and artists
     stats.py                 # statistics computations
     views/                   # play, lists (songs/artists), stats screens
 tests/
@@ -116,7 +103,8 @@ tests/
 
 ### How Wikipedia links are found
 
-1. **Exact:** Wikidata stores Spotify IDs (`P1902` artist, `P2207` track). One SPARQL query maps them to articles.
+1. **Exact:** Wikidata stores Spotify IDs (`P1902` artist, `P2207` track); the IDs come from your export file.
+   One SPARQL query maps them to articles.
 2. **Fallback:** Wikipedia search, accepted only when the article title matches the name. No link is better than a
    wrong one.
 
@@ -130,9 +118,9 @@ tests/
 
 ## TODO
 
-- [ ] Mobile OAuth redirect via custom URL scheme (deep link)
-- [ ] Original release year via MusicBrainz
-- [ ] Device picker for playback
+- [ ] Original release year via MusicBrainz (Deezer and Spotify dates are often remaster/compilation years)
+- [ ] Ask Deezer for written approval before any public release
+- [ ] "Preview by Deezer" branding per Deezer's trademark guidelines
 - [ ] Achievements / badges on the stats page
 - [ ] Optional multiple-choice mode
 - [ ] Localised UI (DE/EN) and Wikipedia language setting in the UI

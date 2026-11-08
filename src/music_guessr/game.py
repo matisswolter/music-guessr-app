@@ -53,6 +53,10 @@ class GameSession:
     def remaining(self) -> int:
         return len(self._queue)
 
+    def peek_next(self) -> Track | None:
+        """The track the next call to next_track() will return (for prefetching)."""
+        return self._queue[-1] if self._queue else None
+
     def next_track(self) -> Track | None:
         self.current = self._queue.pop() if self._queue else None
         return self.current

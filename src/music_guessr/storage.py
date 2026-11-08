@@ -1,14 +1,44 @@
-"""SQLite persistence for rounds, guessed songs and guessed artists."""
+"""SQLite persistence: imported playlists, Deezer matches, rounds, guessed songs and artists."""
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .models import RoundResult, Track
+from .models import Artist, RoundResult, Track
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS playlists (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    source TEXT NOT NULL,
+    imported_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS playlist_tracks (
+    playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    track_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    artists TEXT NOT NULL,          -- JSON [[id, name], ...]
+    album TEXT,
+    year INTEGER,
+    isrc TEXT,
+    duration_ms INTEGER,
+    uri TEXT,
+    PRIMARY KEY (playlist_id, position)
+);
+-- Deezer match per track (IDs and cover only - never audio). deezer_id NULL = no preview found.
+CREATE TABLE IF NOT EXISTS deezer_matches (
+    track_id TEXT PRIMARY KEY,
+    deezer_id INTEGER,
+    cover_url TEXT,
+    link TEXT,
+    release_date TEXT,
+    checked_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS rounds (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     played_at TEXT NOT NULL,
@@ -54,6 +84,7 @@ class Storage:
     def __init__(self, path: Path | str):
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(_SCHEMA)
         self._migrate()
 
@@ -65,6 +96,55 @@ class Storage:
                 self.conn.execute("ALTER TABLE guessed_artists ADD COLUMN image_url TEXT")
             if "image_checked" not in cols:
                 self.conn.execute("ALTER TABLE guessed_artists ADD COLUMN image_checked INTEGER NOT NULL DEFAULT 0")
+
+    # --- imported playlists -----------------------------------------------------
+    def save_playlist(self, name: str, tracks: list[Track], source: str) -> str:
+        """Store an imported playlist; re-importing a playlist with the same name replaces it."""
+        with self.conn:
+            old = self.conn.execute("SELECT id FROM playlists WHERE name = ?", (name,)).fetchone()
+            pid = old["id"] if old else uuid.uuid4().hex
+            self.conn.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", (pid,))
+            self.conn.execute("INSERT OR REPLACE INTO playlists (id, name, source, imported_at) VALUES (?,?,?,?)",
+                              (pid, name, source, _now()))
+            self.conn.executemany(
+                "INSERT INTO playlist_tracks (playlist_id, position, track_id, title, artists, album, year, isrc,"
+                " duration_ms, uri) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                [(pid, i, t.id, t.title, json.dumps([[a.id, a.name] for a in t.artists]), t.album, t.year, t.isrc,
+                  t.duration_ms, t.uri) for i, t in enumerate(tracks)],
+            )
+        return pid
+
+    def playlists(self) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT p.*, COUNT(t.position) AS size FROM playlists p LEFT JOIN playlist_tracks t"
+            " ON t.playlist_id = p.id GROUP BY p.id ORDER BY p.name COLLATE NOCASE")]
+
+    def delete_playlist(self, playlist_id: str) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+
+    def playlist_tracks(self, playlist_id: str) -> list[Track]:
+        rows = self.conn.execute("SELECT * FROM playlist_tracks WHERE playlist_id = ? ORDER BY position",
+                                 (playlist_id,))
+        return [Track(id=r["track_id"], title=r["title"],
+                      artists=tuple(Artist(i, n) for i, n in json.loads(r["artists"])),
+                      year=r["year"], uri=r["uri"] or "", album=r["album"] or "",
+                      duration_ms=r["duration_ms"] or 0, isrc=r["isrc"]) for r in rows]
+
+    # --- Deezer matches ----------------------------------------------------------
+    def deezer_match(self, track_id: str) -> dict | None:
+        """Cached match row, or None if this track was never looked up."""
+        r = self.conn.execute("SELECT * FROM deezer_matches WHERE track_id = ?", (track_id,)).fetchone()
+        return dict(r) if r else None
+
+    def set_deezer_match(self, track_id: str, match) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO deezer_matches (track_id, deezer_id, cover_url, link, release_date, checked_at)"
+                " VALUES (?,?,?,?,?,?)",
+                (track_id, match.deezer_id if match else None, match.cover_url if match else None,
+                 match.link if match else None, match.release_date if match else None, _now()),
+            )
 
     def record_round(self, track: Track, result: RoundResult, playlist_id: str | None = None,
                      played_at: str | None = None) -> None:

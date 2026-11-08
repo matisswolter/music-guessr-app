@@ -5,24 +5,18 @@ from __future__ import annotations
 import flet as ft
 
 from . import config, images, wikipedia
-from .spotify import SpotifyAuth, SpotifyClient
 from .storage import Storage
 from .views.lists import ArtistsView, SongsView
 from .views.play import PlayView
 from .views.stats import StatsView
 
-ACCENT = "#1DB954"
+ACCENT = "#A238FF"  # Deezer-ish purple
 
 
 class AppState:
     def __init__(self):
         data = config.data_dir()
         self.storage = Storage(data / "music_guessr.sqlite3")
-        self.auth = SpotifyAuth(config.SPOTIFY_CLIENT_ID, config.SPOTIFY_REDIRECT_URI, data / "spotify_token.json") \
-            if config.SPOTIFY_CLIENT_ID else None
-        self.spotify = SpotifyClient(self.auth) if self.auth else None
-        self.login_waiting = False
-        self.login_url = ""
 
 
 def main(page: ft.Page):
@@ -42,8 +36,7 @@ def main(page: ft.Page):
     def _fill_links():
         try:
             changed = wikipedia.fill_missing_links(state.storage)
-            spotify = state.spotify if state.auth and state.auth.logged_in else None
-            changed += images.fill_artist_images(state.storage, spotify)
+            changed += images.fill_artist_images(state.storage)
             if changed:
                 refresh_current()
         except Exception as exc:  # network trouble shouldn't break the game

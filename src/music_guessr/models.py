@@ -19,6 +19,7 @@ class Track:
     album: str = ""
     image_url: str | None = None
     duration_ms: int = 0
+    isrc: str | None = None
 
     @property
     def artist_names(self) -> str:
